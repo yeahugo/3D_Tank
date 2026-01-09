@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3D Tank Battle</title>
+    <script type="module" crossorigin src="/assets/index-DNdzFzH7.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-C0LaEjra.css">
+  </head>
+  <body>
+    <div id="app"></div>
+    
+    <div id="ui-layer" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;">
+        <!-- HUD -->
+        <div id="hud" style="display: none;">
+            <div style="position: absolute; top: 10px; left: 10px; color: white; font-family: sans-serif; font-weight: bold; text-shadow: 1px 1px 2px black;">
+                Score: <span id="score">0</span> <br>
+                Health: <span id="health">100</span>% <br>
+                High Score: <span id="highscore">0</span>
+            </div>
+            <!-- Powerup Indicators -->
+            <div id="powerups" style="position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px;">
+                <div id="shield-indicator" style="width: 40px; height: 40px; background: cyan; border-radius: 50%; opacity: 0.3; display: flex; justify-content: center; align-items: center; font-weight: bold;">S</div>
+                <div id="rocket-indicator" style="width: 40px; height: 40px; background: red; border-radius: 50%; opacity: 0.3; display: flex; justify-content: center; align-items: center; font-weight: bold;">R</div>
+            </div>
+        </div>
+        
+        <!-- Start Screen -->
+        <div id="start-screen" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; flex-direction: column; justify-content: center; align-items: center; pointer-events: auto;">
+            <h1 style="color: white; font-size: 48px; margin-bottom: 20px;">3D Tank Battle</h1>
+            <button id="start-btn" style="padding: 15px 40px; font-size: 24px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px;">Start Game</button>
+            <div style="color: white; margin-top: 30px; text-align: center; line-height: 1.6;">
+                <p>WASD or Arrow Keys to Move</p>
+                <p>Mouse to Aim & Shoot</p>
+                <p>Collect Powerups: Cyan (Shield), Red (Rocket), Green (Health)</p>
+            </div>
+        </div>
+    
+        <!-- Game Over Screen -->
+        <div id="game-over-screen" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); flex-direction: column; justify-content: center; align-items: center; pointer-events: auto;">
+            <h1 style="color: red; font-size: 48px;">Game Over</h1>
+            <p style="color: white; font-size: 32px; margin: 20px 0;">Final Score: <span id="final-score">0</span></p>
+            <button id="restart-btn" style="padding: 15px 40px; font-size: 24px; cursor: pointer; background: #2196F3; color: white; border: none; border-radius: 5px;">Play Again</button>
+        </div>
+
+        <!-- Pause Screen -->
+         <div id="pause-screen" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); flex-direction: column; justify-content: center; align-items: center; pointer-events: auto;">
+            <h1 style="color: white; font-size: 48px;">PAUSED</h1>
+            <p style="color: white; font-size: 20px;">Press ESC to Resume</p>
+        </div>
+    </div>
+
+  </body>
+</html>
