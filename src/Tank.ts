@@ -7,11 +7,12 @@ export class Tank {
     body: THREE.Mesh;
     turret: THREE.Group;
     barrel: THREE.Mesh;
-    speed: number = 10;
-    rotateSpeed: number = 2;
+    shieldMesh: THREE.Mesh | null = null;
+    speed: number = 15;  // 提升速度
+    rotateSpeed: number = 3;  // 提升转向速度
     
     lastShotTime: number = 0;
-    fireRate: number = 0.5;
+    fireRate: number = 0.3;  // 提升射速
     health: number = 100;
     maxHealth: number = 100;
     damage: number = 20;
@@ -52,6 +53,19 @@ export class Tank {
         this.barrel.rotation.x = Math.PI / 2; // Cylinder is Y-up, rotate to Z
         this.barrel.position.set(0, 0, -1.5); // Pointing to -Z (Forward)
         this.turret.add(this.barrel);
+        
+        // 创建护盾网格（初始不可见）
+        const shieldGeo = new THREE.SphereGeometry(2.5, 16, 16);
+        const shieldMat = new THREE.MeshBasicMaterial({ 
+            color: 0x00ffff, 
+            transparent: true, 
+            opacity: 0.3,
+            side: THREE.DoubleSide
+        });
+        this.shieldMesh = new THREE.Mesh(shieldGeo, shieldMat);
+        this.shieldMesh.position.y = 0.5;
+        this.shieldMesh.visible = false;
+        this.mesh.add(this.shieldMesh);
     }
 
     move(dt: number, moveForward: boolean, moveBackward: boolean, rotateLeft: boolean, rotateRight: boolean) {
@@ -106,16 +120,23 @@ export class Tank {
     updateEffects(dt: number) {
         if (this.hasShield) {
             this.shieldTimer -= dt;
+            // 显示护盾并添加旋转动画
+            if (this.shieldMesh) {
+                this.shieldMesh.visible = true;
+                this.shieldMesh.rotation.y += dt * 2;
+            }
             if (this.shieldTimer <= 0) {
                 this.hasShield = false;
-                // Remove visual effect if any (handled in Game or here?)
+                if (this.shieldMesh) this.shieldMesh.visible = false;
             }
+        } else {
+            if (this.shieldMesh) this.shieldMesh.visible = false;
         }
         
         if (this.damageBoostTimer > 0) {
             this.damageBoostTimer -= dt;
             if (this.damageBoostTimer <= 0) {
-                this.damage = 20; // Reset damage
+                this.damage = 20;
             }
         }
     }

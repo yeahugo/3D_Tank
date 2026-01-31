@@ -7,11 +7,16 @@ import { Item, ItemType } from './Item';
 import { SoundManager } from './SoundManager';
 import { ParticleSystem } from './ParticleSystem';
 import { Obstacle } from './Obstacle';
+import { Base } from './Base';
+import { LevelManager } from './LevelManager';
+import { EnemySpawn } from './Level';
 
 export enum GameState {
     START,
+    LEVEL_SELECT,
     PLAYING,
     PAUSED,
+    VICTORY,
     GAMEOVER
 }
 
@@ -33,6 +38,13 @@ export class Game {
     ground!: THREE.Mesh;
     raycaster: THREE.Raycaster;
     mousePlane: THREE.Plane;
+    
+    // 关卡系统
+    levelManager: LevelManager;
+    base: Base | null = null;
+    pendingEnemies: { spawn: EnemySpawn; timer: number }[] = [];
+    totalEnemies: number = 0;
+    destroyedEnemies: number = 0;
     
     score: number = 0;
     npcSpawnTimer: number = 0;
@@ -60,10 +72,10 @@ export class Game {
         this.mousePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
         this.soundManager = new SoundManager();
         this.particleSystem = new ParticleSystem(this.scene);
+        this.levelManager = new LevelManager();
 
         this.setupLights();
         this.setupGround();
-        this.setupObstacles();
         
         this.player = new Tank(0x00ff00);
         this.scene.add(this.player.mesh);
@@ -71,8 +83,13 @@ export class Game {
         window.addEventListener('resize', () => this.onWindowResize(), false);
 
         // UI Event Listeners
-        document.getElementById('start-btn')!.addEventListener('click', () => this.startGame());
+        document.getElementById('start-btn')!.addEventListener('click', () => this.showLevelSelect());
         document.getElementById('restart-btn')!.addEventListener('click', () => this.resetGame());
+        document.getElementById('next-level-btn')?.addEventListener('click', () => this.goToNextLevel());
+        document.getElementById('back-to-menu-btn')?.addEventListener('click', () => this.backToMenu());
+        
+        // 关卡选择按钮
+        this.setupLevelButtons();
         
         window.addEventListener('keydown', (e) => {
             if (e.code === 'Escape') {
@@ -87,17 +104,89 @@ export class Game {
         this.animate();
     }
 
+    setupLevelButtons() {
+        const levels = this.levelManager.getLevels();
+        const container = document.getElementById('level-buttons');
+        if (!container) return;
+        
+        container.innerHTML = '';
+        levels.forEach((level, index) => {
+            const btn = document.createElement('button');
+            btn.className = 'level-btn';
+            btn.innerText = `${index + 1}. ${level.name}`;
+            btn.addEventListener('click', () => this.startLevel(index));
+            container.appendChild(btn);
+        });
+    }
+
+    showLevelSelect() {
+        this.state = GameState.LEVEL_SELECT;
+        document.getElementById('start-screen')!.style.display = 'none';
+        document.getElementById('level-select-screen')!.style.display = 'flex';
+    }
+
+    startLevel(levelIndex: number) {
+        this.levelManager.setCurrentLevel(levelIndex);
+        this.loadCurrentLevel();
+        this.startGame();
+    }
+
+    loadCurrentLevel() {
+        const level = this.levelManager.getCurrentLevel();
+        if (!level) return;
+        
+        // 清理旧关卡
+        this.clearLevel();
+        
+        // 设置玩家位置
+        this.player.mesh.position.set(
+            level.playerStart.x,
+            level.playerStart.y,
+            level.playerStart.z
+        );
+        this.player.health = this.player.maxHealth;
+        
+        // 创建基地
+        this.base = new Base(new THREE.Vector3(
+            level.base.position.x,
+            level.base.position.y,
+            level.base.position.z
+        ));
+        this.scene.add(this.base.mesh);
+        
+        // 加载障碍物
+        for (const obs of level.obstacles) {
+            const obstacle = new Obstacle(
+                new THREE.Vector3(obs.position.x, obs.position.y, obs.position.z),
+                new THREE.Vector3(obs.size.x, obs.size.y, obs.size.z)
+            );
+            this.obstacles.push(obstacle);
+            this.scene.add(obstacle.mesh);
+        }
+        
+        // 设置敌人生成队列
+        this.pendingEnemies = level.enemies.map(e => ({
+            spawn: e,
+            timer: e.delay || 0
+        }));
+        this.totalEnemies = level.enemies.length;
+        this.destroyedEnemies = 0;
+    }
+
     startGame() {
         this.state = GameState.PLAYING;
         document.getElementById('start-screen')!.style.display = 'none';
+        document.getElementById('level-select-screen')!.style.display = 'none';
         document.getElementById('hud')!.style.display = 'block';
         this.clock.start();
-        this.soundManager.ctx.resume(); // Ensure AudioContext is resumed
+        this.soundManager.ctx.resume();
         
-        // Spawn one NPC immediately visible
-        const npc = new NPC(new THREE.Vector3(0, 0, -20));
-        this.scene.add(npc.tank.mesh);
-        this.npcs.push(npc);
+        // 更新关卡信息显示
+        const level = this.levelManager.getCurrentLevel();
+        if (level) {
+            const levelInfo = document.getElementById('level-info');
+            if (levelInfo) levelInfo.innerText = level.name;
+        }
     }
 
     pauseGame() {
@@ -124,7 +213,20 @@ export class Game {
         }
     }
 
-    resetGame() {
+    victory() {
+        this.state = GameState.VICTORY;
+        document.getElementById('victory-screen')!.style.display = 'flex';
+        document.getElementById('hud')!.style.display = 'none';
+        document.getElementById('victory-score')!.innerText = this.score.toString();
+        
+        // 检查是否有下一关
+        const nextBtn = document.getElementById('next-level-btn');
+        if (nextBtn) {
+            nextBtn.style.display = this.levelManager.hasNextLevel() ? 'block' : 'none';
+        }
+    }
+
+    clearLevel() {
         // Clear NPCs
         for (const npc of this.npcs) {
             this.scene.remove(npc.tank.mesh);
@@ -143,12 +245,43 @@ export class Game {
         }
         this.projectiles = [];
         
-        // Clear Obstacles (optional, but good for random generation)
+        // Clear Obstacles
         for (const obs of this.obstacles) {
             this.scene.remove(obs.mesh);
         }
         this.obstacles = [];
-        this.setupObstacles();
+        
+        // Clear Base
+        if (this.base) {
+            this.scene.remove(this.base.mesh);
+            this.base = null;
+        }
+        
+        // Clear pending enemies
+        this.pendingEnemies = [];
+    }
+
+    goToNextLevel() {
+        if (this.levelManager.nextLevel()) {
+            document.getElementById('victory-screen')!.style.display = 'none';
+            this.loadCurrentLevel();
+            this.startGame();
+        }
+    }
+
+    backToMenu() {
+        this.clearLevel();
+        this.state = GameState.START;
+        document.getElementById('victory-screen')!.style.display = 'none';
+        document.getElementById('game-over-screen')!.style.display = 'none';
+        document.getElementById('hud')!.style.display = 'none';
+        document.getElementById('start-screen')!.style.display = 'flex';
+        this.score = 0;
+    }
+
+    resetGame() {
+        // 清理当前关卡
+        this.clearLevel();
 
         // Reset Player
         this.scene.remove(this.player.mesh);
@@ -161,10 +294,10 @@ export class Game {
         this.itemSpawnTimer = 0;
         
         document.getElementById('game-over-screen')!.style.display = 'none';
-        document.getElementById('hud')!.style.display = 'block';
         
-        this.state = GameState.PLAYING;
-        this.clock.start();
+        // 重新加载当前关卡
+        this.loadCurrentLevel();
+        this.startGame();
     }
 
     setupLights() {
@@ -313,21 +446,31 @@ export class Game {
                 this.player.aim(point);
             }
 
-            // Shooting
-            if (this.inputManager.isMouseDown) {
+            // Shooting (空格键)
+            if (this.inputManager.isKeyPressed('Space')) {
                 const projectile = this.player.shoot();
                 if (projectile) {
                     this.scene.add(projectile.mesh);
                     this.projectiles.push(projectile);
+                    this.soundManager.playShoot();
                 }
             }
+            
+            // 更新玩家效果（护盾等）
+            this.player.updateEffects(dt);
         }
 
-        // NPC Spawning
-        this.npcSpawnTimer -= dt;
-        if (this.npcs.length < this.maxNPCs && this.npcSpawnTimer <= 0) {
-            this.spawnNPC();
-            this.npcSpawnTimer = 3.0; // Spawn every 3 seconds
+        // 关卡敌人生成 (基于延迟队列)
+        for (let i = this.pendingEnemies.length - 1; i >= 0; i--) {
+            this.pendingEnemies[i].timer -= dt;
+            if (this.pendingEnemies[i].timer <= 0) {
+                const spawn = this.pendingEnemies[i].spawn;
+                const pos = new THREE.Vector3(spawn.position.x, spawn.position.y, spawn.position.z);
+                const npc = new NPC(pos, spawn.type);
+                this.scene.add(npc.tank.mesh);
+                this.npcs.push(npc);
+                this.pendingEnemies.splice(i, 1);
+            }
         }
 
         // Item Spawning
@@ -371,11 +514,10 @@ export class Game {
         // NPC Update
         for (let i = this.npcs.length - 1; i >= 0; i--) {
             const npc = this.npcs[i];
-            const projectile = npc.update(dt, this.player);
+            const projectile = npc.update(dt, this.player, this.base || undefined);
             if (projectile) {
                 this.scene.add(projectile.mesh);
                 this.projectiles.push(projectile);
-                // Optional: Sound for NPC shoot (maybe quieter?)
             }
         }
 
@@ -408,11 +550,30 @@ export class Game {
                         this.scene.remove(this.npcs[j].tank.mesh);
                         this.npcs.splice(j, 1);
                         this.score += 100;
+                        this.destroyedEnemies++;
                         console.log("NPC Destroyed! Score:", this.score);
                         this.particleSystem.createExplosion(p.mesh.position, 0xffaa00, 30);
                         this.soundManager.playExplosion();
+                        
+                        // 检查胜利条件
+                        this.checkVictory();
                     }
                     break;
+                }
+            }
+            
+            // Check collision with Base
+            if (this.base && !this.base.isDestroyed) {
+                if (this.base.boundingBox.containsPoint(p.mesh.position)) {
+                    hit = true;
+                    this.base.takeDamage(1);
+                    this.particleSystem.createExplosion(p.mesh.position, 0xff0000, 20);
+                    this.soundManager.playExplosion();
+                    
+                    if (this.base.isDestroyed) {
+                        console.log("Base Destroyed! Game Over!");
+                        this.gameOver();
+                    }
                 }
             }
             
@@ -441,6 +602,15 @@ export class Game {
         this.updateUI();
     }
 
+    checkVictory() {
+        // 所有敌人都被消灭且没有待生成的敌人
+        if (this.destroyedEnemies >= this.totalEnemies && 
+            this.npcs.length === 0 && 
+            this.pendingEnemies.length === 0) {
+            this.victory();
+        }
+    }
+
     updateUI() {
         document.getElementById('score')!.innerText = this.score.toString();
         document.getElementById('health')!.innerText = Math.max(0, this.player.health).toString();
@@ -450,6 +620,68 @@ export class Game {
         
         shieldInd.style.opacity = this.player.hasShield ? '1' : '0.3';
         rocketInd.style.opacity = this.player.damage > 20 ? '1' : '0.3';
+        
+        // 更新敌人数量
+        const enemiesLeft = this.npcs.length + this.pendingEnemies.length;
+        const enemiesEl = document.getElementById('enemies-left');
+        if (enemiesEl) enemiesEl.innerText = enemiesLeft.toString();
+        
+        // 更新基地状态
+        const baseStatus = document.getElementById('base-status');
+        if (baseStatus && this.base) {
+            if (this.base.isDestroyed) {
+                baseStatus.style.color = '#ff0000';
+                baseStatus.innerText = '💥 Base: DESTROYED';
+            } else {
+                baseStatus.style.color = '#00ff00';
+                baseStatus.innerText = '🏠 Base: OK';
+            }
+        }
+        
+        // 更新小地图
+        this.updateMinimap();
+    }
+    
+    updateMinimap() {
+        const canvas = document.getElementById('minimap-canvas') as HTMLCanvasElement;
+        if (!canvas) return;
+        
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        
+        const mapSize = 100; // 游戏地图大小的一半
+        const canvasSize = 150;
+        const scale = canvasSize / (mapSize * 2);
+        
+        // 清空画布
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(0, 0, canvasSize, canvasSize);
+        
+        // 绘制玩家（绿色）
+        ctx.fillStyle = '#00ff00';
+        const px = (this.player.mesh.position.x + mapSize) * scale;
+        const pz = (this.player.mesh.position.z + mapSize) * scale;
+        ctx.beginPath();
+        ctx.arc(px, pz, 5, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 绘制敌人（红色）
+        ctx.fillStyle = '#ff0000';
+        for (const npc of this.npcs) {
+            const ex = (npc.tank.mesh.position.x + mapSize) * scale;
+            const ez = (npc.tank.mesh.position.z + mapSize) * scale;
+            ctx.beginPath();
+            ctx.arc(ex, ez, 4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        // 绘制基地（金色）
+        if (this.base && !this.base.isDestroyed) {
+            ctx.fillStyle = '#FFD700';
+            const bx = (this.base.mesh.position.x + mapSize) * scale;
+            const bz = (this.base.mesh.position.z + mapSize) * scale;
+            ctx.fillRect(bx - 4, bz - 4, 8, 8);
+        }
     }
 
     animate() {
